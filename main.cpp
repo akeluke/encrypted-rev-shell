@@ -1,21 +1,31 @@
-#include <iostream>
 #include "utils.h"
+#include "args_parser.h"
+unsigned int defPort = 443;
 
-int main() {
+int main(int argc, char *argv[]) {
 
 
-    auto lang = "C++";
+    /*  Program Layout
+     *  User passes argument 'client' or 'server'
+     *  'client' would be a compromised host attempting to connect back to attacker
+     *  'server' would be an attacker waiting for a connection
+     *
+     *  if 'server' arg passed, we just need one parameter and that's a port number to listen on (default 443)
+     *
+     *  if 'client' arg passed, we need the IPv4 addr and PORT number of the 'server'
+     *
+     *  then connect and set up an encrypted rev shell (method undecided)
+     */
 
-    int calculation = check();
+    parse_args(argc, argv);
 
-    std::cout << calculation << std::endl;
-
-    std::cout << "Hello and welcome to " << lang << "!\n";
-
-    for (int i = 1; i <= 5; i++) {
-
-        std::cout << "i = " << i << std::endl;
-    }
 
     return 0;
+}
+
+// placeholder for now
+void server(unsigned int portNum) {
+}
+
+void client() {
 }
