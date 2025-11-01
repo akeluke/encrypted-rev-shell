@@ -3,6 +3,8 @@
 
 #include "utils.h"
 
+unsigned int defPort = 443;
+
 struct config {
     std::string execType;
     unsigned int portNum;
@@ -16,23 +18,29 @@ inline config parse_args(int argc, char* argv[]) {
         if (strcmp(toLower(argv[1]),  "server") == 0) {
 
             tmpCfg.execType = argv[1];
-            // user has specified port
             if (argc >= 3) {
-                if (isPort(argv[2])) {
-                    const int input_num = atoi(argv[2]);
+                if (checkIfIpAddr(argv[2])) {
+                    tmpCfg.ipAddr = argv[2];
 
-                    tmpCfg.portNum = input_num;
+                    if (isPort(argv[3])) {
+                        const int input_num = atoi(argv[3]);
 
-                    return tmpCfg;
+                        tmpCfg.portNum = input_num;
+
+                        return tmpCfg;
+                    }
+                    else {
+                        std::cout << "Invalid Argument: " << argv[2] << " is NOT a valid PORT!" << std::endl;
+                        std::cout << "Usage ./shell server LISTEN_IP LISTEN_PORT" << std::endl;
+                    }
                 }
                 else {
-                    std::cout << "Invalid Argument: " << argv[2] << " Is not a port number!" << std::endl;
-                    std::cout << "Usage ./shell server PORT" << std::endl;
+                    std::cout << "Invalid Argument: " << argv[2] << " is NOT a valid IP address!" << std::endl;
+                    std::cout << "Usage ./shell server LISTEN_IP LISTEN_PORT" << std::endl;
                 }
             }
-            // no port specified, notify will by default run on 443
             else {
-                tmpCfg.portNum = 443;
+                std::cout << "Usage ./shell server SERVER_IP SERVER_PORT" << std::endl;
             }
 
         }

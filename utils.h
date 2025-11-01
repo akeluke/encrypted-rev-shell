@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iostream>
 #include <arpa/inet.h>
+#include <unistd.h>
 
 inline char* toLower(char* arg) {
 
