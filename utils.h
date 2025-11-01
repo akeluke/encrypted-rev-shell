@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstring>
 #include <iostream>
+#include <arpa/inet.h>
 
 inline char* toLower(char* arg) {
 
@@ -24,11 +25,35 @@ inline char* toLower(char* arg) {
 }
 
 
-inline bool isInteger(char* arg) {
+inline bool isPort(char* arg) {
     std::string inputStr = arg;
 
-    return std::all_of(inputStr.begin(), inputStr.end(),
-                     [](unsigned char c) { return std::isdigit(c); });
+    if ( std::all_of(inputStr.begin(), inputStr.end(),
+                     [](unsigned char c) { return std::isdigit(c); })) {
+        int inputNum = std::stoi(inputStr);
+
+        if ( inputNum >= 1 && inputNum <= 65535) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+    return false;
+
+}
+
+inline bool checkIfIpAddr(char* arg) {
+    unsigned char buf[sizeof(struct in_addr)];
+
+    int check = inet_pton(AF_INET, arg, buf);
+
+    if (check <= 0) {
+        return false;
+    }
+    else {
+        return true;
+    }
 }
 
 #endif //ENCRYPTED_REV_SHELL_UTILS_H

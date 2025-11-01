@@ -1,5 +1,7 @@
 #include "utils.h"
 #include "args_parser.h"
+
+
 unsigned int defPort = 443;
 
 int main(int argc, char *argv[]) {
@@ -16,9 +18,7 @@ int main(int argc, char *argv[]) {
      *
      *  then connect and set up an encrypted rev shell (method undecided)
      */
-
-    parse_args(argc, argv);
-
+    struct config cfg = parse_args(argc, argv);
 
     return 0;
 }
@@ -27,5 +27,5 @@ int main(int argc, char *argv[]) {
 void server(unsigned int portNum) {
 }
 
-void client() {
+void client(const std::string &ipAddr, unsigned int portNum) {
 }
