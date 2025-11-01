@@ -1,0 +1,4 @@
+#ignore ide files
+.idea/
+#ignore build files
+cmake-build-debug/
