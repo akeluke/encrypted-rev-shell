@@ -1,15 +1,14 @@
-
 #include "utils.h"
 #include "args_parser.h"
 
 // placeholder for now
-void server(const std::string &ipAddr, unsigned int portNum) {
+void server(const std::string &serverIpAddr, unsigned int portNum) {
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET; // define IPV4
     serverAddr.sin_port = htons(portNum); // set port, htons coverts port to byte order
-    serverAddr.sin_addr.s_addr = inet_addr(ipAddr.c_str()); // listen on any available IP (allow further config?)
+    serverAddr.sin_addr.s_addr = inet_addr(serverIpAddr.c_str()); // listen on any available IP (allow further config?)
 
     bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
 
@@ -17,28 +16,49 @@ void server(const std::string &ipAddr, unsigned int portNum) {
 
     listen(serverSocket, 5);
 
-    int clientSocket = accept(serverSocket, nullptr, nullptr);
+    // get info on connecting client
+    struct sockaddr_storage clientAddr;
+    socklen_t clientAddrLen = sizeof(clientAddr);
+    char clientIpAddr[INET_ADDRSTRLEN];
 
-    char buffer[1024] = {0};
-    recv(clientSocket, buffer, sizeof(buffer), 0);
+    int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
 
-    std::cout << "Message from client: " << buffer << std::endl;
+    struct sockaddr_in *s = (struct sockaddr_in *)&clientAddr;
+    int clientPort = ntohs(s->sin_port); // converts byte to port number
+    inet_ntop(AF_INET, &s->sin_addr, clientIpAddr, sizeof clientIpAddr); // get readable ipv4 addr
+
+    std::cout << "[+] Connection Received from: " << clientIpAddr << " On Port: " << clientPort << std::endl;
+
+    char buffer[1024];
+    while (true) {
+
+        // placeholder
+        std::cout << "[client_hostname] ";
+
+        std::string msgToSend;
+        std::getline(std::cin, msgToSend);
+
+        send(clientSocket, msgToSend.c_str(), msgToSend.length(), 0);
+
+        memset(buffer, 0, sizeof(buffer));
+        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0);
+
+        if (bytesReceived <= 0) {
+            std::cout << "[!] Client Disconnected!" << std::endl;
+            break;
+        }
+
+        if (std::string(buffer) == "exit") {
+            std::cout << "[!] Received exit from Client!" << std::endl;
+            break;
+        }
+
+        std::cout << "[->]: " << buffer << std::endl;
+    }
 
     close(serverSocket);
-
-    /*
-    while (true) {
-        try {
-
-
-
-        }catch (std::exception &e) {
-            std::cout << "An error occured!" << std::endl;
-            close(serverSocket);
-        }
-    }
-    */
 }
+
 
 void client(const std::string &ipAddr, unsigned int portNum) {
 
@@ -50,19 +70,34 @@ void client(const std::string &ipAddr, unsigned int portNum) {
     serverAddr.sin_port = htons(portNum);
     serverAddr.sin_addr.s_addr = inet_addr(ipAddr.c_str());
 
+    connect(clientSocket, (struct sockaddr*)&serverAddr,sizeof(serverAddr));
+
+    std::cout << "[+] Connected to server successfully" << std::endl;
+
+    char buffer[1024];
     // sending connection request
-    connect(clientSocket, (struct sockaddr*)&serverAddr,
-            sizeof(serverAddr));
+    while (true){
 
-    // sending data
-    std::string tmpStr;
-    std::cout << "[+] ";
-    std::cin >> tmpStr;
+        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0);
 
-    const char* message = tmpStr.c_str();
+        if (bytesReceived >= 0) {
+            //std::cout << "[+] Msg received: " << buffer << std::endl;
+        }
 
+        if (std::string(buffer) == "exit") {
+            std::cout << "[!] Received exit from Server!" << std::endl;
+            break;
+        }
 
-    send(clientSocket, message, strlen(message), 0);
+        // sending data
+        memset(buffer, 0, sizeof(buffer));
+
+        std::string tmpStr = "RESPONSE FROM SHELL";
+
+        const char* message = tmpStr.c_str();
+
+        send(clientSocket, message, strlen(message), 0);
+    }
 
     // closing socket
     close(clientSocket);
