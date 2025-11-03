@@ -11,6 +11,8 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <pty.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 inline char* toLower(char* arg) {
 
@@ -60,12 +62,15 @@ inline bool checkIfIpAddr(char* arg) {
     }
 }
 
-inline void safeShutdown(const std::string& msgToSnd, const int socket, const int socket_fd) {
+inline void safeShutdown(const std::string& msgToSnd, const int socket, const int socket_fd, SSL* ssl,  SSL_CTX* ctx) {
     std::cout << msgToSnd << std::endl;
     const char *message = msgToSnd.c_str();
     send(socket, message, strlen(message), 0);
     close(socket);
     close(socket_fd);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    EVP_cleanup();
     exit(EXIT_FAILURE);
 }
 
