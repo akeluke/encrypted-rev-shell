@@ -3,8 +3,6 @@
 
 #include "utils.h"
 
-unsigned int defPort = 443;
-
 struct config {
     std::string execType;
     unsigned int portNum;
@@ -79,7 +77,5 @@ inline config parse_args(int argc, char* argv[]) {
         }
     }
 }
-
-
 
 #endif //ENCRYPTED_REV_SHELL_ARGS_PARSER_H

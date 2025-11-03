@@ -70,7 +70,6 @@ inline void safeShutdown(const std::string& msgToSnd, const int socket, const in
     close(socket_fd);
     SSL_free(ssl);
     SSL_CTX_free(ctx);
-    EVP_cleanup();
     exit(EXIT_FAILURE);
 }
 

