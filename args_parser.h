@@ -76,6 +76,9 @@ inline config parse_args(int argc, char* argv[]) {
             std::cout << "Usage: ./shell [SERVER or CLIENT]" << std::endl;;
         }
     }
+    else {
+        std::cout << "Usage: ./shell [SERVER or CLIENT]" << std::endl;
+    }
 }
 
 #endif //ENCRYPTED_REV_SHELL_ARGS_PARSER_H
