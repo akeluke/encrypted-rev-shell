@@ -5,7 +5,9 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_executable(encrypted_rev_shell main.cpp
         utils.h
-        args_parser.h)
+        args_parser.h
+        client_utils.h
+        server_utils.h)
 
 find_package(OpenSSL REQUIRED)
 

