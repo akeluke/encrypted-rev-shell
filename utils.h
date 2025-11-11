@@ -39,7 +39,6 @@ inline char* toLower(char* arg) {
     return returnChar;
 }
 
-
 inline bool isPort(char* arg) {
     std::string inputStr = arg;
 
@@ -71,6 +70,18 @@ inline bool checkIfIpAddr(char* arg) {
     }
 }
 
+inline SSL_CTX* createSSLCtx() {
+    // https://docs.openssl.org/master/man3/SSL_CTX_new/#synopsis
+    const SSL_METHOD *method = TLS_method(); // setting cipher/algorithm to be used (in this case the server ssl)
+    SSL_CTX* ctx = SSL_CTX_new(method);
+
+    if (!ctx) {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    return ctx;
+}
+
 inline void safeShutdown(const std::string& msgToSnd, const int socket, const int socket_fd, SSL* ssl,  SSL_CTX* ctx) {
     std::cout << msgToSnd << std::endl;
     const char *message = msgToSnd.c_str();
@@ -81,13 +92,12 @@ inline void safeShutdown(const std::string& msgToSnd, const int socket, const in
     SSL_CTX_free(ctx);
     exit(EXIT_FAILURE);
 }
-// Function returns the file path of the file we want as an std::string
 
 inline std::vector<std::byte> readFileAsByteVector(const std::string& filePath) {
     std::ifstream inputFile(filePath, std::ios::binary | std::ios::ate);
 
     if (!inputFile) {
-        std::cout << "[!] Error opening file " << filePath << std::endl;
+        std::cout << "[!] Error opening file: " << filePath << std::endl;
         return {};
     }
 
@@ -97,7 +107,7 @@ inline std::vector<std::byte> readFileAsByteVector(const std::string& filePath) 
     std::vector<std::byte> fileBuffer (fileSize);
 
     if (!inputFile.read(reinterpret_cast<char*>(fileBuffer.data()), fileSize)) {
-        std::cout << "[!] Error reading file " << filePath << std::endl;
+        std::cout << "[!] Error reading file: " << filePath << std::endl;
     }
 
     inputFile.close();

@@ -5,7 +5,7 @@
 
 struct config {
     std::string execType;
-    unsigned int portNum;
+    unsigned int portNum{};
     std::string ipAddr;
 };
 
@@ -79,6 +79,8 @@ inline config parse_args(int argc, char* argv[]) {
     else {
         std::cout << "Usage: ./shell [SERVER or CLIENT]" << std::endl;
     }
+
+    return tmpCfg;
 }
 
 #endif //ENCRYPTED_REV_SHELL_ARGS_PARSER_H
