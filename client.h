@@ -104,7 +104,7 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
                 SSL_read(ssl, &pathToWrite, sizeof(pathToWrite));
                 transferCfg.pathToWrite = std::string(pathToWrite);
 
-                std::vector<std::byte> incomingFile = handleIncomingFile(ssl);
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToWrite);
 
                 if (!incomingFile.empty()) {
                     writeBytesToFile(incomingFile, transferCfg.pathToWrite);
@@ -124,7 +124,7 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
                     SSL_write(ssl, err, strlen(err));
                 }
                 else {
-                    prepareAndUpload(ssl, fileBuffer, transferCfg.type, transferCfg.pathToWrite);
+                    transferFile(ssl, fileBuffer, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
                 }
 
 

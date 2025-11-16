@@ -93,6 +93,32 @@ inline void safeShutdown(const std::string& msgToSnd, const int socket, const in
     exit(EXIT_FAILURE);
 }
 
+
+inline void fileTransferStatus(ssize_t totalBytes, ssize_t currentBytes, std::string fileName) {
+
+    // TODO
+    // Fix this for client upload
+    // as the status prints to clients terminal and not server
+
+
+    float percentage = std::round((static_cast<float>(currentBytes) / static_cast<float>(totalBytes)) * 100);
+
+    int progress = static_cast<int>(percentage);
+
+
+    if (progress <= 100) {
+        std::cout << "[+] Downloading '" << fileName <<"': [";
+        std::cout << std::string(progress / 10, '*');
+        std::cout << "] " << int(progress) << " %\r";
+        if (progress != 100) {
+            std::cout.flush();
+        }
+        else {
+            std::cout << std::endl;
+        }
+    }
+}
+
 inline std::vector<std::byte> readFileAsByteVector(const std::string& filePath) {
     std::ifstream inputFile(filePath, std::ios::binary | std::ios::ate);
 
@@ -130,7 +156,17 @@ inline bool writeBytesToFile(std::vector<std::byte> fileBuffer, const std::strin
     return true;
 }
 
-inline std::vector<std::byte> handleIncomingFile(SSL* ssl) {
+inline std::vector<std::byte> handleIncomingFile(SSL* ssl, const std::string& fileName) {
+
+    // We are reading data from the 'transferFile()' function
+    // This is the order of SSL writes we are reading:
+    // in the main server() or client() function, it reads what type of request it is: either 'upload' or download'
+    // so we dont do that here
+
+    // but we read:
+    // the file size
+    // the file bytes
+
     //read the file size
     uint32_t fileSize = 0;
     SSL_read(ssl, &fileSize, sizeof(fileSize));
@@ -150,14 +186,15 @@ inline std::vector<std::byte> handleIncomingFile(SSL* ssl) {
             std::cout << "Failed to read Incoming File!!" << std::endl;
             break;
         }
-
         totalRead += bytesRead;
+
+        fileTransferStatus(fileSize, totalRead, fileName);
     }
 
     return fileBuffer;
 }
 
-inline void prepareAndUpload(SSL* ssl, const std::vector<std::byte>& fileBuffer, const std::string& command, const std::string& pathToWrite) {
+inline void transferFile(SSL* ssl, const std::vector<std::byte>& fileBuffer, const std::string& command, const std::string& pathToRead, const std::string& pathToWrite) {
 
     // send the command we want to use so the server/client knows what to expect(upload/download)
     SSL_write(ssl, command.c_str(), command.size());
@@ -174,6 +211,11 @@ inline void prepareAndUpload(SSL* ssl, const std::vector<std::byte>& fileBuffer,
 
     // finally send the file
     SSL_write(ssl, fileBuffer.data(), fileBuffer.size());
+}
+
+
+inline void refreshTerminal(SSL* ssl) {
+    SSL_write(ssl, "\n", 1);
 }
 
 #endif //ENCRYPTED_REV_SHELL_UTILS_H

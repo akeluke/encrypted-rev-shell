@@ -3,3 +3,6 @@
 #ignore build files
 cmake-build-debug/
 cmake-build-release/
+
+#ignore libs
+openssl-static/

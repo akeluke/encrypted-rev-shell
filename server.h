@@ -152,6 +152,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
 
     fd_set fdSet;
     char ttyBuffer[4096];
+    fileTransfer transferCfg;
     while (true) {
         // setting up select() func
         FD_ZERO(&fdSet);
@@ -180,12 +181,12 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
 
                 char pathToWrite[4096];
                 SSL_read(ssl, &pathToWrite, sizeof(pathToWrite));
-
-                std::vector<std::byte> incomingFile = handleIncomingFile(ssl);
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToRead);
 
                 if (!incomingFile.empty()) {
                     writeBytesToFile(incomingFile, std::string(pathToWrite));
                     std::cout << "[+] Downloaded file to: " << std::string(pathToWrite) << std::endl;
+                    refreshTerminal(ssl);
                 }
                 else {
                     std::cout << "[!] An error occurred in transmission!" << std::endl;
@@ -214,23 +215,20 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
                 }
                 else if (inputCmd.find("upload") != std::string::npos) {
 
-                    fileTransfer transferCfg = s_parseCommand(ttyBuffer);
+                    transferCfg = s_parseCommand(ttyBuffer);
 
                     if (!transferCfg.type.empty() && !transferCfg.pathToRead.empty() && !transferCfg.pathToWrite.empty()) {
                         std::vector<std::byte> fileBuffer = readFileAsByteVector(transferCfg.pathToRead);
 
-                        prepareAndUpload(ssl, fileBuffer, transferCfg.type, transferCfg.pathToWrite);
+                        transferFile(ssl, fileBuffer, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
                     }
-
-
-
                 }
                 else if (inputCmd.find("download") != std::string::npos) {
 
                     // Send download to client with local file on client machine, and path to write on this machine
                     // wait for a response that contains (fileBytes)
 
-                    fileTransfer transferCfg = s_parseCommand(ttyBuffer);
+                    transferCfg = s_parseCommand(ttyBuffer);
 
                     if (!transferCfg.type.empty() && !transferCfg.pathToRead.empty() && !transferCfg.pathToWrite.empty()) {
                         s_prepareClientToDownload(ssl, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
