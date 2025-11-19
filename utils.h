@@ -39,8 +39,15 @@ inline char* toLower(char* arg) {
     return returnChar;
 }
 
-inline bool isPort(char* arg) {
-    std::string inputStr = arg;
+inline bool isPort(const char* arg) {
+
+    std::string inputStr;
+
+    if (arg != nullptr) {
+        inputStr = arg;
+    } else {
+        return false;
+    }
 
     if ( std::all_of(inputStr.begin(), inputStr.end(),
                      [](unsigned char c) { return std::isdigit(c); })) {
@@ -94,27 +101,28 @@ inline void safeShutdown(const std::string& msgToSnd, const int socket, const in
 }
 
 
-inline void fileTransferStatus(ssize_t totalBytes, ssize_t currentBytes, std::string fileName) {
+inline void fileTransferStatus(ssize_t totalBytes, ssize_t currentBytes, std::string fileName, std::string transferType) {
 
     // TODO
     // Fix this for client upload
-    // as the status prints to clients terminal and not server
-
+    // as the status currently prints to clients terminal and not server terminal
 
     float percentage = std::round((static_cast<float>(currentBytes) / static_cast<float>(totalBytes)) * 100);
 
     int progress = static_cast<int>(percentage);
 
-
     if (progress <= 100) {
-        std::cout << "[+] Downloading '" << fileName <<"': [";
-        std::cout << std::string(progress / 10, '*');
-        std::cout << "] " << int(progress) << " %\r";
-        if (progress != 100) {
-            std::cout.flush();
-        }
-        else {
-            std::cout << std::endl;
+        // we don't want to print to client terminal. wanting to keep that as empty as possible
+        if (transferType == "download") {
+            std::cout << "[+] Downloading '" << fileName <<"': [";
+            std::cout << std::string(progress / 10, '*');
+            std::cout << "] " << int(progress) << " %\r";
+            if (progress != 100) {
+                std::cout.flush();
+            }
+            else {
+                std::cout << std::endl;
+            }
         }
     }
 }
@@ -156,7 +164,7 @@ inline bool writeBytesToFile(std::vector<std::byte> fileBuffer, const std::strin
     return true;
 }
 
-inline std::vector<std::byte> handleIncomingFile(SSL* ssl, const std::string& fileName) {
+inline std::vector<std::byte> handleIncomingFile(SSL* ssl, const std::string& fileName, const std::string& transferType) {
 
     // We are reading data from the 'transferFile()' function
     // This is the order of SSL writes we are reading:
@@ -188,7 +196,7 @@ inline std::vector<std::byte> handleIncomingFile(SSL* ssl, const std::string& fi
         }
         totalRead += bytesRead;
 
-        fileTransferStatus(fileSize, totalRead, fileName);
+        fileTransferStatus(fileSize, totalRead, fileName, transferType);
     }
 
     return fileBuffer;
@@ -205,14 +213,12 @@ inline void transferFile(SSL* ssl, const std::vector<std::byte>& fileBuffer, con
     // get the file size
     auto fileSize = static_cast<uint32_t>(fileBuffer.size());
     // convert to byte order for compatibility
-    fileSize = htonl(fileSize);
+    unsigned int htFileSize = htonl(fileSize);
     // tell the server/client the size of the file so that it is wanted to be sent.
-    SSL_write(ssl, &fileSize, sizeof(fileSize));
-
-    // finally send the file
+    SSL_write(ssl, &htFileSize, sizeof(htFileSize));
+    // write the file as bytes to SSL connection
     SSL_write(ssl, fileBuffer.data(), fileBuffer.size());
 }
-
 
 inline void refreshTerminal(SSL* ssl) {
     SSL_write(ssl, "\n", 1);

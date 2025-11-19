@@ -28,7 +28,7 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (clientSocket < 0) {
-        std::cout << "Failed to create client socket!" << std::endl;
+        perror("[!] Failed to create client socket");
         exit(1);
     }
 
@@ -38,8 +38,14 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
     serverAddr.sin_port = htons(portNum);
     serverAddr.sin_addr.s_addr = inet_addr(ipAddr.c_str());
 
-    if (connect(clientSocket, reinterpret_cast<struct sockaddr *>(&serverAddr),sizeof(serverAddr)) < 0) {
-        std::cout << "Failed to connect to server!" << std::endl;
+    // FIX BUG WHERE IP CANT BE RESOLVED
+
+    const int connection = connect(clientSocket, reinterpret_cast<struct sockaddr *>(&serverAddr),sizeof(serverAddr));
+
+    std::cout << "[!] Connected to server!" << std::endl;
+
+    if (connection < 0) {
+        perror("[!] Failed to connect to server");
         close(clientSocket);
         exit(-1);
     }
@@ -104,13 +110,13 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
                 SSL_read(ssl, &pathToWrite, sizeof(pathToWrite));
                 transferCfg.pathToWrite = std::string(pathToWrite);
 
-                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToWrite);
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToWrite, "upload");
 
                 if (!incomingFile.empty()) {
                     writeBytesToFile(incomingFile, transferCfg.pathToWrite);
                 }
                 else {
-                    std::cout << "[!] An error occured in transmission!" << std::endl;
+                    std::cout << "[!] An error occurred in transmission!" << std::endl;
                 }
             }
             else if (tmpStr.find("download") != std::string::npos) {
@@ -151,11 +157,7 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
         }
     }
 
-    SSL_free(ssl);
-    SSL_CTX_free(ctx);
-    close(clientSocket);
-    close(masterFd);
-    wait(nullptr);
+   safeShutdown("[!] Shutting down!", clientSocket, masterFd, ssl, ctx);
 }
 
 

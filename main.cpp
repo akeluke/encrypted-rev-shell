@@ -14,8 +14,9 @@ int main(const int argc, char *argv[]) {
      *
      *  if 'client' arg passed, we need the IPv4 addr and PORT number of the listening 'server'
      *
-     *  then connect and set up an encrypted rev shell (using OpenSSL TLS, Typically 1.2)
+     *  then connect and set up an encrypted rev shell (using OpenSSL TLS)
      */
+
     struct config cfg = parse_args(argc, argv);
 
     // check if parser worked

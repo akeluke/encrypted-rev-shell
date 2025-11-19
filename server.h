@@ -95,7 +95,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (serverSocket < 0) {
-        std::cout << "Failed to create server socket!" << std::endl;
+        perror("[!] Failed to create server socket");
         exit(EXIT_FAILURE);
     }
 
@@ -106,13 +106,13 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
 
     // check bind is okay
     if (bind(serverSocket, reinterpret_cast<struct sockaddr *>(&serverAddr), sizeof(serverAddr)) < 0) {
-        std::cout << "Failed to bind server socket!" << std::endl;
+        perror("[!] Failed to bind server socket");
         exit(EXIT_FAILURE);
     }
 
     // check we can listen on bind
     if (listen(serverSocket, 5) < 0) {
-        std::cout << "Failed to listen on server socket!" << std::endl;
+        perror("[!] Failed to listen on server socket");
         exit(EXIT_FAILURE);
     }
 
@@ -177,11 +177,12 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
                 std::cout << "[!] Client disconnected" << std::endl;
                 break;
             }
+
             if (tmpStr.find("download") != std::string::npos) {
 
                 char pathToWrite[4096];
                 SSL_read(ssl, &pathToWrite, sizeof(pathToWrite));
-                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToRead);
+                std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToRead, "download");
 
                 if (!incomingFile.empty()) {
                     writeBytesToFile(incomingFile, std::string(pathToWrite));
@@ -222,6 +223,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
 
                         transferFile(ssl, fileBuffer, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
                     }
+                    refreshTerminal(ssl);
                 }
                 else if (inputCmd.find("download") != std::string::npos) {
 
@@ -243,11 +245,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
         }
     }
 
-    SSL_free(ssl);
-    SSL_CTX_free(ctx);
-
-    close(clientSocket);
-    close(serverSocket);
+    safeShutdown("[!] Shutting Down!", clientSocket, serverSocket, ssl, ctx);
 }
 
 
