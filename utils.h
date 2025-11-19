@@ -89,15 +89,25 @@ inline SSL_CTX* createSSLCtx() {
     return ctx;
 }
 
-inline void safeShutdown(const std::string& msgToSnd, const int socket, const int socket_fd, SSL* ssl,  SSL_CTX* ctx) {
-    std::cout << msgToSnd << std::endl;
-    const char *message = msgToSnd.c_str();
-    send(socket, message, strlen(message), 0);
-    close(socket);
-    close(socket_fd);
-    SSL_free(ssl);
-    SSL_CTX_free(ctx);
-    exit(EXIT_FAILURE);
+inline int safeShutdown(const std::string& errMsg, const int socket, const int socket_fd, SSL* ssl,  SSL_CTX* ctx) {
+
+    if (!errMsg.empty()) {
+        perror(errMsg.c_str());
+    }
+    if (socket > 0) {
+        close(socket);
+    }
+    if (socket_fd > 0) {
+        close(socket_fd);
+    }
+    if (ssl != nullptr) {
+        SSL_free(ssl);
+    }
+    if (ctx != nullptr) {
+        SSL_CTX_free(ctx);
+    }
+
+    return 0;
 }
 
 
@@ -131,7 +141,8 @@ inline std::vector<std::byte> readFileAsByteVector(const std::string& filePath) 
     std::ifstream inputFile(filePath, std::ios::binary | std::ios::ate);
 
     if (!inputFile) {
-        std::cout << "[!] Error opening file: " << filePath << std::endl;
+        std::string err =  "[!] Error opening file: " + filePath + "Reason: ";
+        perror(err.c_str());
         return {};
     }
 
@@ -141,7 +152,9 @@ inline std::vector<std::byte> readFileAsByteVector(const std::string& filePath) 
     std::vector<std::byte> fileBuffer (fileSize);
 
     if (!inputFile.read(reinterpret_cast<char*>(fileBuffer.data()), fileSize)) {
-        std::cout << "[!] Error reading file: " << filePath << std::endl;
+        std::string err =  "[!] Error reading file as bytes: " + filePath + "Reason: ";
+        perror(err.c_str());
+        return {};
     }
 
     inputFile.close();
@@ -153,12 +166,12 @@ inline bool writeBytesToFile(std::vector<std::byte> fileBuffer, const std::strin
     std::ofstream outputFile(filePath, std::ios::binary | std::ios::ate);
 
     if (!outputFile) {
-        std::cout << "[!] Error opening file " << filePath << std::endl;
+        perror("[!] Error opening file");
         return false;
     }
 
     if (!outputFile.write(reinterpret_cast<char*>(fileBuffer.data()), fileBuffer.size())) {
-        std::cout << "[!] Error writing file " << filePath << std::endl;
+        perror("[!] Error writing file");
         return false;
     }
     return true;

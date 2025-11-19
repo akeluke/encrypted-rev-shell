@@ -14,3 +14,8 @@ However, some basic features currently include:
 - Modify client code for cross-platform compatibility (Windows specifically)
 - Fix hefty amount of bugs
 - Improve code readability
+
+
+# DISCLAIMER
+This application has been developed for research purposes, and SHOULD NOT be used for any malicious purposes
+and this is an example of how a reverse shell may bypass firewalls etc so these systems can be improved to catch adversaries. 

@@ -84,19 +84,17 @@ inline void s_prepareClientToDownload(SSL* ssl, const std::string& command, cons
 
 inline void s_configureServerCtx(SSL_CTX* ctx) {
     // load the cert and private key
-    if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0
-        || SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-        }
+    if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0 || SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0)
+    {
+        safeShutdown("[!] Failed to configure server CTX", 0, 0, nullptr, nullptr);
+    }
 }
 
-inline void server(const std::string &serverIpAddr, unsigned int portNum) {
+inline int server(const std::string &serverIpAddr, unsigned int portNum) {
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (serverSocket < 0) {
-        perror("[!] Failed to create server socket");
-        exit(EXIT_FAILURE);
+        safeShutdown("[!] Failed to create server socket", 0,0,nullptr,nullptr);
     }
 
     sockaddr_in serverAddr{};
@@ -106,14 +104,12 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
 
     // check bind is okay
     if (bind(serverSocket, reinterpret_cast<struct sockaddr *>(&serverAddr), sizeof(serverAddr)) < 0) {
-        perror("[!] Failed to bind server socket");
-        exit(EXIT_FAILURE);
+        safeShutdown("[!] Failed to bind server socket", serverSocket, 0, nullptr, nullptr);
     }
 
     // check we can listen on bind
     if (listen(serverSocket, 5) < 0) {
-        perror("[!] Failed to listen on server socket");
-        exit(EXIT_FAILURE);
+        safeShutdown("[!] Failed to listen on server socket", serverSocket, 0, nullptr, nullptr);
     }
 
     std::cout << "[+] Server listening on " << serverIpAddr << ":" << portNum << std::endl;
@@ -140,14 +136,14 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
     SSL_set_fd(ssl, clientSocket);
 
     if (SSL_accept(ssl) <= 0) {
-        ERR_print_errors_fp(stderr);
+        safeShutdown("[!] Failed to initialise TLS handshake!", serverSocket, 0, ssl, ctx);
     } else {
         std::cout << "[+] TLS handshake successful!\n" << std::endl;
     }
 
     // check we were able to accept connection from client
     if (clientSocket < 0) {
-        safeShutdown("[!] Failed To Accept Incoming Connection!", serverSocket, clientSocket, ssl, ctx);
+        return safeShutdown("[!] Failed To Accept Incoming Connection!", serverSocket, clientSocket, ssl, ctx);
     }
 
     fd_set fdSet;
@@ -174,8 +170,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
             std::string tmpStr(ttyBuffer, bytesReceived);
             // if no data, client has disconnected and we can exit
             if (bytesReceived <= 0) {
-                std::cout << "[!] Client disconnected" << std::endl;
-                break;
+                return safeShutdown("[!] Client has disconnected!", serverSocket, clientSocket, ssl, ctx);
             }
 
             if (tmpStr.find("download") != std::string::npos) {
@@ -185,9 +180,10 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
                 std::vector<std::byte> incomingFile = handleIncomingFile(ssl, transferCfg.pathToRead, "download");
 
                 if (!incomingFile.empty()) {
-                    writeBytesToFile(incomingFile, std::string(pathToWrite));
-                    std::cout << "[+] Downloaded file to: " << std::string(pathToWrite) << std::endl;
-                    refreshTerminal(ssl);
+                    if ( writeBytesToFile(incomingFile, std::string(pathToWrite))) {
+                        std::cout << "[+] Downloaded file to: " << std::string(pathToWrite) << std::endl;
+                        refreshTerminal(ssl);
+                    }
                 }
                 else {
                     std::cout << "[!] An error occurred in transmission!" << std::endl;
@@ -212,7 +208,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
 
                 if (inputCmd.find("exit") != std::string::npos) {
                     // execute shutdown
-                    safeShutdown("[!] Exit has been executed, exiting...", clientSocket, serverSocket, ssl, ctx);
+                    return safeShutdown("[!] Exit has been executed, exiting...", serverSocket, STDIN_FILENO, ssl, ctx);
                 }
                 else if (inputCmd.find("upload") != std::string::npos) {
 
@@ -233,7 +229,16 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
                     transferCfg = s_parseCommand(ttyBuffer);
 
                     if (!transferCfg.type.empty() && !transferCfg.pathToRead.empty() && !transferCfg.pathToWrite.empty()) {
-                        s_prepareClientToDownload(ssl, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
+
+                        // check we can actually write to the path the user requested..
+                        std::ofstream tmpFileCheck(transferCfg.pathToWrite, std::ios::binary | std::ios::ate);
+                        if (!tmpFileCheck) {
+                            perror("[!] Cant write to that location");
+                            refreshTerminal(ssl);
+                        }
+                        else {
+                            s_prepareClientToDownload(ssl, transferCfg.type, transferCfg.pathToRead, transferCfg.pathToWrite);
+                        }
                     }
                 }
                 else {
@@ -245,7 +250,7 @@ inline void server(const std::string &serverIpAddr, unsigned int portNum) {
         }
     }
 
-    safeShutdown("[!] Shutting Down!", clientSocket, serverSocket, ssl, ctx);
+    return safeShutdown("[!] Shutting Down!", clientSocket, serverSocket, ssl, ctx);
 }
 
 

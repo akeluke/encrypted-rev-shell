@@ -3,6 +3,18 @@
 #include "client.h"
 #include "server.h"
 
+// using termios and raw mode to allow us to
+void setRawMode(termios &orig) {
+    termios raw = orig;
+    // disable line buffering so we can check input instantly
+    raw.c_lflag &= ~(ICANON | ECHO);
+    // setting min chars to read and timeout to 0 or no timeout
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    // get the current terminal settings
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+}
+
 int main(const int argc, char *argv[]) {
 
     /*  Program Layout
@@ -16,6 +28,14 @@ int main(const int argc, char *argv[]) {
      *
      *  then connect and set up an encrypted rev shell (using OpenSSL TLS)
      */
+
+
+    // save original terminal settings
+    termios orig;
+    tcgetattr(STDIN_FILENO, &orig);
+    // enable raw mode to allow for better use of arrow keys
+    setRawMode(orig);
+
 
     struct config cfg = parse_args(argc, argv);
 
@@ -31,6 +51,10 @@ int main(const int argc, char *argv[]) {
         client(cfg.ipAddr, cfg.portNum);
     }
 
-    return 0;
+    // both client and server should break and reach here before exiting.
+    // TODO: catch ctrl+C
+    tcsetattr(STDIN_FILENO, TCSANOW, &orig);
+
+    return 1;
 }
 
