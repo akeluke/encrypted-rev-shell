@@ -3,7 +3,7 @@
 This project is based on some coursework set by my University, it is far from being complete
 and requires much more work. However, I am continuously improving it.
 
-However, some basic features currently include: 
+Some basic features currently include: 
 - Connection using OpenSSL v.3
 - Full TTy shell on client using forkpty()
 - Functionality to Download and Upload files to and from server
